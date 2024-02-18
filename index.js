@@ -1,44 +1,57 @@
-const puppeteer = require('puppeteer');
-const baseUrl = "https://www.ffhandball.fr/competitions/";
-const mongoose = require('mongoose');
-const dbUrl = 'mongodb+srv://ascrhb:HPEMFCDLUxcISHEY@db.psmtqt8.mongodb.net/'
+const puppeteer = require("puppeteer");
+const baseUrl = "https://www.ffhandball.fr/competitions";
+const mongoose = require("mongoose");
+const config = require("./config.json");
+const teams = require("./teams.json");
 const debug = true;
 
 // TODO: input data array of each teams
 
-//main 
+//main
 (async () => {
-  const db = initDbConnection(dbUrl);
+  console.log("Starting");
+  const season = teams.utils.season;
+  const db = initDbConnection(config.mongoURI);
 
-  // TODO: Iterate on each teams 
-  // begin
-  let season = 'saison-2023-2024-19';
-  let championship = '16-ans-prenationale-masculine-bretagne-22352';
-  let groupe= 'poule-127203';
-  let team= 'equipe-1586490';
+  for (const team of teams.ascr) {
+    console.log("Scrapping team: " + team.name);
+    const leaderboard = await getLeaderboard(
+      season,
+      team.championship, 
+      team.groupeID
+    );
+    // TODO: Nullable return handling
 
-  const leaderboard = await getLeaderboard(season, championship, groupe);
-  // TODO: Nullable return handling
+    // TODO: put results in DB
 
-  // TODO: put results in DB
+    const playersStats = await getPlayersStats(
+      season, 
+      team.championship, 
+      team.teamID
+    );
 
-  const playersStats = await getPlayersStats(season, championship, team);
-  // TODO: Nullable return handling
+    // TODO: Nullable return handling
 
-  const goalKeepersStats = await getGoalKeepersStats(season, championship, team);
-  // TODO: Nullable return handling
+    const goalKeepersStats = await getGoalKeepersStats(
+      season,
+      team.championship,
+      team.teamID
+    );
+    // TODO: Nullable return handling
 
-  // TODO: put results in DB
-  //end
-  console.log("My job is done.")
+    // TODO: put results in DB
+  }
+  console.log("My job is done.");
   db.close();
 })();
 
+//--- SCRAPPING ---//
+
 /**
  * Get leaderboard data and format into an object
- * @param {string} season 
- * @param {string} championship 
- * @param {string} groupe 
+ * @param {string} season
+ * @param {string} championship
+ * @param {string} groupe
  * @returns {object|null}
  */
 async function getLeaderboard(season, championship, groupe) {
@@ -46,35 +59,50 @@ async function getLeaderboard(season, championship, groupe) {
     headless: !debug,
   });
   const page = await browser.newPage();
-  
+
   // Your Puppeteer script goes here
-  await page.goto(baseUrl + '/' + season + '/regional/' + championship + '/' + groupe + '/classements/');
-  
+  await page.goto(
+    baseUrl +
+      "/" +
+      season +
+      "/regional/" +
+      championship +
+      "/" +
+      groupe +
+      "/classements/"
+  );
+
   await rejectCoockies(page);
 
-  const table_class = '.style_classement__VzowG';
+  const table_class = ".style_classement__VzowG";
   const leaderboard = await page.$(table_class);
 
   // LeaderBoard parsing
   if (leaderboard) {
-    console.log("Leaderboard exist, parse it..."); 
+    console.log("Leaderboard exist, parse it...");
     const headsArray = [];
     const cellsArray = [];
 
     // Table parsing
-    const rows = await leaderboard.$$('tr');
+    const rows = await leaderboard.$$("tr");
     for (const rowElement of rows) {
       // Thead parsing
-      const headCells = await rowElement.$$('th');
+      const headCells = await rowElement.$$("th");
       for (const headCellElement of headCells) {
-        const headCellContent = await page.evaluate(element => element.textContent, headCellElement)
+        const headCellContent = await page.evaluate(
+          (element) => element.textContent,
+          headCellElement
+        );
         headsArray.push(headCellContent);
       }
 
       // Tbody parsing
-      const cells = await rowElement.$$('td');
+      const cells = await rowElement.$$("td");
       for (const cellElement of cells) {
-        const cellContent = await page.evaluate(element => element.textContent, cellElement);
+        const cellContent = await page.evaluate(
+          (element) => element.textContent,
+          cellElement
+        );
         cellsArray.push(cellContent);
       }
     }
@@ -88,10 +116,10 @@ async function getLeaderboard(season, championship, groupe) {
 
 /**
  * Same as getPlayersStats but it get goalkeepers stats
- * @param {string} season 
- * @param {string} championship 
- * @param {string} team 
- * @returns 
+ * @param {string} season
+ * @param {string} championship
+ * @param {string} team
+ * @returns
  */
 async function getGoalKeepersStats(season, championship, team) {
   return await getPlayersStats(season, championship, team, true);
@@ -99,98 +127,138 @@ async function getGoalKeepersStats(season, championship, team) {
 
 /**
  * Get players statistics and format data into an object
- * @param {string} season 
- * @param {string} championship 
- * @param {string} team 
+ * @param {string} season
+ * @param {string} championship
+ * @param {string} team
  * @param {bool} goalkeepers
  * @returns {object}
  */
-async function getPlayersStats(season, championship, team, goalkeepers = false) {
+async function getPlayersStats(
+  season,
+  championship,
+  team,
+  goalkeepers = false
+) {
   const browser = await puppeteer.launch({
     headless: !debug,
   });
   const page = await browser.newPage();
-  
+
   // Your Puppeteer script goes here
-  await page.goto(baseUrl + '/' + season + '/regional/' + championship + '/' + team + '/statistiques/');
-  
+  await page.goto(
+    baseUrl +
+      "/" +
+      season +
+      "/regional/" +
+      championship +
+      "/" +
+      team +
+      "/statistiques/"
+  );
+
   await rejectCoockies(page);
 
   if (goalkeepers) {
-    console.log("Goalkeepers Parsing!");
-    const playersTypeBtn = await page.$$('.styles_button__LdmfN');
+    console.log("Goalkeepers Parsing...");
+    const playersTypeBtn = await page.$$(".styles_button__LdmfN");
     const goalkeepersBtn = await playersTypeBtn[1];
+    
+    // Handle no goalkeepers section
+    if (!goalkeepersBtn) {
+      console.log("No goalkeepers stats.");
+      await browser.close();
+      return null;
+    }
+    console.log("Goalkeepers section existe, parsing it!");
     goalkeepersBtn.click();
   }
 
   // Headers parsing
-  const headers = await page.$('.styles_header__Y92xl');
+  const headers = await page.$(".styles_header__Y92xl");
   if (headers) {
     const headsArray = [];
     const cellsArray = [];
     // Maybe make a data cleaner ?
     const unwantedClass = [
-      'styles_toggle__D7pZQ', 
-      'styles_club__Krzom', 
-      'styles_icon__n2b21', 
-      'styles_vertical__F05AF', 
-      'styles_horizontal__iyDAK',
-      'styles_club__oGTOg',
-      'styles_toggle__GbMsD'
+      "styles_toggle__D7pZQ",
+      "styles_club__Krzom",
+      "styles_icon__n2b21",
+      "styles_vertical__F05AF",
+      "styles_horizontal__iyDAK",
+      "styles_club__oGTOg",
+      "styles_toggle__GbMsD",
     ];
 
     // Check if there is more than one page of player
-    let navigationBtn = await page.$$('.styles_iconButton__C35f5');
+    let navigationBtn = await page.$$(".styles_iconButton__C35f5");
     let nextPageBtnDisabled;
-    if (navigationBtn>0) {
+    if (navigationBtn > 0) {
       let nextPageBtn = await navigationBtn[2];
-      nextPageBtnDisabled = await page.evaluate(element => element.disabled, nextPageBtn);
+      nextPageBtnDisabled = await page.evaluate(
+        (element) => element.disabled,
+        nextPageBtn
+      );
     } else {
       nextPageBtnDisabled = true;
     }
 
     console.log("Headers exist, parse it!");
-    const headersRows = await headers.$$('div');
+    const headersRows = await headers.$$("div");
     for (const headerElement of headersRows) {
-      const headClass = await page.evaluate(element => element.className, headerElement);
+      const headClass = await page.evaluate(
+        (element) => element.className,
+        headerElement
+      );
 
       if (!unwantedClass.includes(headClass)) {
-        let headerContent = await page.evaluate(element => element.textContent, headerElement);
+        let headerContent = await page.evaluate(
+          (element) => element.textContent,
+          headerElement
+        );
         headsArray.push(headerContent);
       }
     }
 
     // Handling multiple results pages parsing
     do {
-      if (navigationBtn>0)  {
-        navigationBtn = await page.$$('.styles_iconButton__C35f5');
+      if (navigationBtn > 0) {
+        navigationBtn = await page.$$(".styles_iconButton__C35f5");
         nextPageBtn = await navigationBtn[2];
-        nextPageBtnDisabled = await page.evaluate(element => element.disabled, nextPageBtn);
+        nextPageBtnDisabled = await page.evaluate(
+          (element) => element.disabled,
+          nextPageBtn
+        );
       }
-      const rows = await page.$$('.styles_row__29ajo');
+      const rows = await page.$$(".styles_row__29ajo");
       if (rows) {
         console.log("There is rows, parsing them!");
 
         for (const rowElement of rows) {
-          let cells = await rowElement.$$('div');
+          let cells = await rowElement.$$("div");
           for (const cellElement of cells) {
-            const cellClass = await page.evaluate(element => element.className, cellElement);
+            const cellClass = await page.evaluate(
+              (element) => element.className,
+              cellElement
+            );
 
             if (!unwantedClass.includes(cellClass)) {
-              const cellContent = await page.evaluate(element => element.textContent, cellElement);
+              const cellContent = await page.evaluate(
+                (element) => element.textContent,
+                cellElement
+              );
               cellsArray.push(cellContent);
             }
           }
         }
       }
 
-      if (navigationBtn>0) {
+      if (navigationBtn > 0) {
         console.log("NEXT PAGE !");
         await nextPageBtn.click();
         console.log("PAGE OK");
       }
     } while (!nextPageBtnDisabled);
-    // TODO: details => styles_details__bhl4i ; later 
+    // TODO: details => styles_details__bhl4i ; later
     await browser.close();
     return headsAndCellsObjectConstruct(headsArray, cellsArray);
   }
@@ -200,11 +268,13 @@ async function getPlayersStats(season, championship, team, goalkeepers = false) 
   return null;
 }
 
+//--- DATA RECORDS ---//
+
 //--- UTILS ---//
 
 /**
- * Format data from two array into an usable object 
- * @param {array} heads 
+ * Format data from two array into an usable object
+ * @param {array} heads
  * @param {array} cells
  * @return {object}
  */
@@ -233,12 +303,12 @@ function headsAndCellsObjectConstruct(heads, cells) {
 
 /**
  * Reject cookies
- * @param {page} page 
+ * @param {page} page
  */
 async function rejectCoockies(page) {
-  const continue_wo_agree = '.didomi-continue-without-agreeing';
+  const continue_wo_agree = ".didomi-continue-without-agreeing";
   const cookie_btn = await page.$(continue_wo_agree);
-  
+
   if (cookie_btn) {
     console.log("Cookie btn exist, click on it");
     await page.click(continue_wo_agree);
@@ -248,11 +318,11 @@ async function rejectCoockies(page) {
 
 /**
  * Init db connection with mongoose & listen for events
- * @param {string} dbUrl 
- * @returns {Mongoose.connection} 
+ * @param {string} dbUrl
+ * @returns {Mongoose.connection}
  */
 function initDbConnection(dbUrl) {
-  console.log("Trying to connect to database...")
+  console.log("Trying to connect to database...");
   // Connect to MongoDB using mongoose
   mongoose.connect(dbUrl);
 
@@ -260,18 +330,18 @@ function initDbConnection(dbUrl) {
   const db = mongoose.connection;
 
   // Event listener for successful connection
-  db.on('connected', () => {
-    console.log('Connected to MongoDB');
+  db.on("connected", () => {
+    console.log("Connected to MongoDB");
   });
 
   // Event listener for connection errors
-  db.on('error', (err) => {
-    console.error('Error connecting to MongoDB:', err);
+  db.on("error", (err) => {
+    console.error("Error connecting to MongoDB:", err);
   });
 
   // Event listener for disconnection
-  db.on('disconnected', () => {
-    console.log('Disconnected from MongoDB');
+  db.on("disconnected", () => {
+    console.log("Disconnected from MongoDB");
   });
 
   return db;
