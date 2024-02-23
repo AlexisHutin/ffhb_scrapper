@@ -11,6 +11,7 @@
 - [x] Choose DB (Need a containered DB)
 - [ ] Write in DB (ORM ? If yes, wich one ?)
 - [x] Config file
+- [ ] Refactoring : split index.js in some files (utils, parsing, etc)
 - [ ] Containerise it!
 - [ ] Cron tab
 - [ ] Monitoring (very last but nice to have)
