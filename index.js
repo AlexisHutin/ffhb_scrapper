@@ -3,53 +3,60 @@ const baseUrl = "https://www.ffhandball.fr/competitions";
 const mongoose = require("mongoose");
 const config = require("./config.json");
 const teams = require("./teams.json");
-const debug = true;
+const Leaderboard = require("./models/leaderboard.js")
+const headless = true;
 
 //main
 (async () => {
   console.log("Starting");
   const season = teams.utils.season;
-  const db = initDbConnection(config.mongoURI);
+  const db = await initDbConnection(config.mongoURI);
 
   for (const team of teams.ascr) {
     console.log("Scrapping team: " + team.name);
     const leaderboard = await getLeaderboard(
       season,
-      team.championship, 
+      team.championship,
       team.groupeID
     );
-
     // Nullable return handling
     if (!leaderboard) {
       console.log("No datas.");
     } else {
-      // TODO: put results in DB
+      // >Put results in DB
+      let cleanLeaderboardData = await cleanLeaderboard(leaderboard);
+      // Prepare leaderboard for db saving
+      let leaderboardForDb = {
+        team_name: team.name,
+        leaderboard: cleanLeaderboardData,
+      };
+      await saveLeaderboard(leaderboardForDb);
     }
 
     const playersStats = await getPlayersStats(
-      season, 
-      team.championship, 
+      season,
+      team.championship,
       team.teamID
     );
-
     // Nullable return handling
     if (!playersStats) {
       console.log("No datas.");
     } else {
       // TODO: put results in DB
+      await savePlayersStats(playersStats);
     }
 
-    const goalKeepersStats = await getGoalKeepersStats(
+    const goalkeepersStats = await getGoalkeepersStats(
       season,
       team.championship,
       team.teamID
     );
-
     // Nullable return handling
-    if (!goalKeepersStats) {
+    if (!goalkeepersStats) {
       console.log("No datas.");
     } else {
       // TODO: put results in DB
+      await saveGoalkeepersStats(goalkeepersStats);
     }
   }
   console.log("My job is done.");
@@ -67,7 +74,7 @@ const debug = true;
  */
 async function getLeaderboard(season, championship, groupe) {
   const browser = await puppeteer.launch({
-    headless: !debug,
+    headless: headless,
   });
   const page = await browser.newPage();
 
@@ -132,7 +139,7 @@ async function getLeaderboard(season, championship, groupe) {
  * @param {string} team
  * @returns
  */
-async function getGoalKeepersStats(season, championship, team) {
+async function getGoalkeepersStats(season, championship, team) {
   return await getPlayersStats(season, championship, team, true);
 }
 
@@ -151,7 +158,7 @@ async function getPlayersStats(
   goalkeepers = false
 ) {
   const browser = await puppeteer.launch({
-    headless: !debug,
+    headless: headless,
   });
   const page = await browser.newPage();
 
@@ -173,7 +180,7 @@ async function getPlayersStats(
     console.log("Goalkeepers Parsing...");
     const playersTypeBtn = await page.$$(".styles_button__LdmfN");
     const goalkeepersBtn = await playersTypeBtn[1];
-    
+
     // Handle no goalkeepers section
     if (!goalkeepersBtn) {
       console.log("No goalkeepers stats.");
@@ -182,6 +189,8 @@ async function getPlayersStats(
     }
     console.log("Goalkeepers section existe, parsing it!");
     goalkeepersBtn.click();
+  } else {
+    console.log("Players Parsing...");
   }
 
   // Headers parsing
@@ -203,7 +212,8 @@ async function getPlayersStats(
     // Check if there is more than one page of player
     let navigationBtn = await page.$$(".styles_iconButton__C35f5");
     let nextPageBtnDisabled;
-    if (navigationBtn > 0) {
+    if (navigationBtn.length > 2) {
+      console.log("Check if there is more than one page of player ...");
       let nextPageBtn = await navigationBtn[2];
       nextPageBtnDisabled = await page.evaluate(
         (element) => element.disabled,
@@ -232,14 +242,21 @@ async function getPlayersStats(
 
     // Handling multiple results pages parsing
     do {
-      if (navigationBtn > 0) {
+      if (navigationBtn.length > 2 && !nextPageBtnDisabled) {
         navigationBtn = await page.$$(".styles_iconButton__C35f5");
         nextPageBtn = await navigationBtn[2];
-        nextPageBtnDisabled = await page.evaluate(
-          (element) => element.disabled,
-          nextPageBtn
-        );
+        if (nextPageBtn) {
+          nextPageBtnDisabled = await page.evaluate(
+            (element) => element.disabled,
+            nextPageBtn
+          );
+        } else {
+          nextPageBtnDisabled = true;
+        }
+      } else {
+        nextPageBtnDisabled = true;
       }
+
       const rows = await page.$$(".styles_row__29ajo");
       if (rows) {
         console.log("There is rows, parsing them!");
@@ -263,10 +280,10 @@ async function getPlayersStats(
         }
       }
 
-      if (navigationBtn > 0) {
-        console.log("NEXT PAGE !");
+      if (navigationBtn.length > 2 && !nextPageBtnDisabled) {
+        console.log("Next page ...");
         await nextPageBtn.click();
-        console.log("PAGE OK");
+        console.log("Page ready");
       }
     } while (!nextPageBtnDisabled);
     // TODO: details => styles_details__bhl4i ; later
@@ -280,6 +297,74 @@ async function getPlayersStats(
 }
 
 //--- DATA RECORDS ---//
+
+/**
+ * Init db connection with mongoose & listen for events
+ * @param {string} dbUrl
+ * @returns {Promise<mongoose.connection>}
+ */
+async function initDbConnection(dbUrl) {
+  console.log("Trying to connect to database...");
+  // Connect to MongoDB using mongoose
+  await mongoose.connect(dbUrl);
+
+  // Get the default connection
+  const db = mongoose.connection;
+
+  // Event listener for successful connection
+  db.on("connected", () => {
+    console.log("Connected to MongoDB");
+  });
+
+  // Event listener for connection errors
+  db.on("error", (err) => {
+    console.error("Error connecting to MongoDB:", err);
+  });
+
+  // Event listener for disconnection
+  db.on("disconnected", () => {
+    console.log("Disconnected from MongoDB");
+  });
+
+  return db;
+}
+
+/**
+ * Save leaderboard in db
+ * @param {object} leaderboard 
+ */
+async function saveLeaderboard(leaderboard) {
+  console.log("Saving leaderboard...");
+  const newLeaderboard = new Leaderboard(leaderboard);
+
+  try {
+    const savedLeaderboard = await newLeaderboard.save();
+    console.log('Blog saved:', savedLeaderboard);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// TODO: HERE !
+async function savePlayersStats(playersStats) {
+  //For each players
+    // Check if player exist in player table by names
+      // Yes : Add in playerStats table
+      // No : Create player and Add in playerStats table
+}
+
+async function saveGoalkeepersStats(goalkeepersStats) {
+  //For each goalkeepers
+    // Check if goalkeepers exist in player table by names
+      // Yes : Add in playerStats table
+      // No : Create player and Add in playerStats table
+}
+
+async function createPlayer(player) {
+  // Check if player exist in player table by names
+    // No : create player
+    // Yes : Error
+}
 
 //--- UTILS ---//
 
@@ -317,6 +402,7 @@ function headsAndCellsObjectConstruct(heads, cells) {
  * @param {page} page
  */
 async function rejectCoockies(page) {
+  console.log("Rejecting cookies ...");
   const continue_wo_agree = ".didomi-continue-without-agreeing";
   const cookie_btn = await page.$(continue_wo_agree);
 
@@ -328,32 +414,50 @@ async function rejectCoockies(page) {
 }
 
 /**
- * Init db connection with mongoose & listen for events
- * @param {string} dbUrl
- * @returns {Mongoose.connection}
+ * Clean leaderboard data for db save
+ * @param {object} leaderboard
+ * @returns {object}
  */
-function initDbConnection(dbUrl) {
-  console.log("Trying to connect to database...");
-  // Connect to MongoDB using mongoose
-  mongoose.connect(dbUrl);
+async function cleanLeaderboard(leaderboard) {
+  console.log("Cleaning leaderboard datas...");
+  const cleanLeaderboard = {};
 
-  // Get the default connection
-  const db = mongoose.connection;
+  for (const key in leaderboard) {
+    let team = leaderboard[key];
+    cleanLeaderboard[key] = await cleanTeamData(team);
+  }
 
-  // Event listener for successful connection
-  db.on("connected", () => {
-    console.log("Connected to MongoDB");
-  });
+  console.log("Leaderboard datas cleaning Ok!");
+  return cleanLeaderboard;
+}
 
-  // Event listener for connection errors
-  db.on("error", (err) => {
-    console.error("Error connecting to MongoDB:", err);
-  });
+/**
+ * Clean team datas, change fields names and filters some fields
+ * @param {object} team
+ * @returns {object}
+ */
+async function cleanTeamData(team) {
+  console.log("Cleanning team : " + team.Club + " datas...");
+  const feildsNames = {
+    "N°": "position",
+    Club: "team_name",
+    Pts: "points",
+    "J.": "played_games",
+    "G.": "won_games",
+    "N.": "draw_games",
+    "P.": "loos_games",
+    "B +": "scored_goals",
+    "B -": "conceded_goals",
+    "D.": "goal_difference",
+  };
 
-  // Event listener for disconnection
-  db.on("disconnected", () => {
-    console.log("Disconnected from MongoDB");
-  });
+  const cleanTeamData = {};
+  for (const key in team) {
+    if (feildsNames[key]) {
+      cleanTeamData[feildsNames[key]] = team[key];
+    }
+  }
 
-  return db;
+  console.log("Team datas cleaning Ok!");
+  return cleanTeamData;
 }
