@@ -5,8 +5,6 @@ const config = require("./config.json");
 const teams = require("./teams.json");
 const debug = true;
 
-// TODO: input data array of each teams
-
 //main
 (async () => {
   console.log("Starting");
@@ -20,9 +18,13 @@ const debug = true;
       team.championship, 
       team.groupeID
     );
-    // TODO: Nullable return handling
 
-    // TODO: put results in DB
+    // Nullable return handling
+    if (!leaderboard) {
+      console.log("No datas.");
+    } else {
+      // TODO: put results in DB
+    }
 
     const playersStats = await getPlayersStats(
       season, 
@@ -30,16 +32,25 @@ const debug = true;
       team.teamID
     );
 
-    // TODO: Nullable return handling
+    // Nullable return handling
+    if (!playersStats) {
+      console.log("No datas.");
+    } else {
+      // TODO: put results in DB
+    }
 
     const goalKeepersStats = await getGoalKeepersStats(
       season,
       team.championship,
       team.teamID
     );
-    // TODO: Nullable return handling
 
-    // TODO: put results in DB
+    // Nullable return handling
+    if (!goalKeepersStats) {
+      console.log("No datas.");
+    } else {
+      // TODO: put results in DB
+    }
   }
   console.log("My job is done.");
   db.close();

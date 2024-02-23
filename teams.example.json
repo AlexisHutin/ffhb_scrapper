@@ -1,0 +1,19 @@
+{
+  "ascr": [
+    {
+      "name": "team_1_name",
+      "championship": "championship_string_id",
+      "groupeID": "groupe_string_id",
+      "teamID": "team_string_id"
+    },
+    {
+      "name": "team_2_name",
+      "championship": "championship_string_id",
+      "groupeID": "groupe_string_id",
+      "teamID": "team_string_id"
+    }
+  ],
+  "utils": {
+    "season": "saeson_srting_id"
+  }
+}
